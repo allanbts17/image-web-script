@@ -89,16 +89,60 @@
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
         }
 
-        canvas {
-            display: none; /* Procesamos en canvas pero mostramos en img */
-        }
-
-        #result-image {
+        #photo-canvas {
             max-width: 100%;
             height: auto;
             display: block;
             border-radius: 12px;
-            cursor: zoom-in;
+            cursor: grab;
+            margin: 0 auto;
+            background-color: #000;
+        }
+
+        #photo-canvas:active {
+            cursor: grabbing;
+        }
+
+        #result-image {
+            display: none; /* Ahora usamos el canvas */
+        }
+
+        .zoom-controls {
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 16px;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+        }
+
+        .zoom-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+            color: #94a3b8;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            height: 6px;
+            background: rgba(99, 102, 241, 0.2);
+            border-radius: 5px;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: var(--primary);
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(99, 102, 241, 0.5);
         }
 
         .hint {
@@ -178,10 +222,18 @@
         <input type="file" id="file-input" accept="image/*">
     </div>
 
+    <div class="zoom-controls" id="zoom-controls">
+        <div class="zoom-label">
+            <span>Zoom</span>
+            <span id="zoom-value">100%</span>
+        </div>
+        <input type="range" id="zoom-slider" min="1" max="3" step="0.01" value="1">
+    </div>
+
     <div class="preview-container" id="preview-container">
         <canvas id="photo-canvas"></canvas>
         <img id="result-image" alt="Resultado" />
-        <p class="hint" id="save-hint">Tip: Si el botón falla, haz clic derecho aquí y elige "Guardar imagen como..."</p>
+        <p class="hint" id="save-hint">Tip: Puedes arrastrar la foto para acomodarla y usar el slider para el zoom.</p>
     </div>
 
     <button id="download-btn" class="btn btn-primary" style="display: none;">
@@ -208,6 +260,23 @@
     const saveHint = document.getElementById('save-hint');
     const loader = document.getElementById('loader');
 
+    const zoomControls = document.getElementById('zoom-controls');
+    const zoomSlider = document.getElementById('zoom-slider');
+    const zoomValueText = document.getElementById('zoom-value');
+
+    let userImg = null;
+    let frameImg = null;
+    
+    // Estado de transformación
+    let scale = 1;
+    let minScale = 1;
+    let offsetX = 0;
+    let offsetY = 0;
+    
+    // Estado de arrastre
+    let isDragging = false;
+    let startX, startY;
+
     // Manejo de drag and drop
     dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
@@ -233,57 +302,45 @@
     });
 
     async function processImage(file) {
-        console.log("Procesando imagen:", file.name);
         uploadText.style.display = 'none';
         loader.style.display = 'block';
-        console.log(file)
-        console.log(URL.createObjectURL(file))
+        
         try {
-            // Usar FileReader para evitar problemas de origen blob:null en file://
             const reader = new FileReader();
             reader.onload = async (e) => {
                 const b64Photo = e.target.result;
-                const userImg = await loadImage(b64Photo);
-                console.log("Imagen de usuario cargada (Base64)");
+                userImg = await loadImage(b64Photo);
                 
-                const frameImg = await loadImage(FRAME_URL).catch(err => {
+                frameImg = await loadImage(FRAME_URL).catch(err => {
                     console.warn("No se pudo cargar el marco:", err);
                     return null;
                 });
-
-                if (frameImg) {
-                    console.log("Marco cargado con éxito.");
-                }
 
                 const size = frameImg ? frameImg.width : userImg.width;
                 canvas.width = size;
                 canvas.height = size;
 
-                ctx.clearRect(0, 0, size, size);
-
-                const scale = Math.max(size / userImg.width, size / userImg.height);
-                const x = (size / 2) - (userImg.width / 2) * scale;
-                const y = (size / 2) - (userImg.height / 2) * scale;
-                ctx.drawImage(userImg, x, y, userImg.width * scale, userImg.height * scale);
+                // Calcular escala mínima (cubrir todo el canvas)
+                minScale = Math.max(size / userImg.width, size / userImg.height);
+                scale = minScale;
                 
-                if (frameImg) {
-                    ctx.drawImage(frameImg, 0, 0, size, size);
-                } else {
-                    alert("Atención: No se pudo cargar el marco.");
-                }
+                // Centrar inicialmente
+                offsetX = (size - userImg.width * scale) / 2;
+                offsetY = (size - userImg.height * scale) / 2;
 
-                const finalDataUrl = canvas.toDataURL('image/png');
-                resultImage.src = finalDataUrl;
+                // Configurar slider
+                zoomSlider.min = minScale;
+                zoomSlider.max = minScale * 4;
+                zoomSlider.value = scale;
+                updateZoomText();
+
+                draw();
 
                 previewContainer.style.display = 'block';
+                zoomControls.style.display = 'flex';
                 downloadBtn.style.display = 'inline-flex';
                 saveHint.style.display = 'block';
                 uploadText.innerText = 'Cambiar imagen';
-                loader.style.display = 'none';
-                uploadText.style.display = 'block';
-            };
-            reader.onerror = (err) => {
-                console.error("Error al leer el archivo:", err);
                 loader.style.display = 'none';
                 uploadText.style.display = 'block';
             };
@@ -296,45 +353,121 @@
         }
     }
 
+    function draw() {
+        if (!userImg) return;
+
+        const size = canvas.width;
+        ctx.clearRect(0, 0, size, size);
+
+        // Aplicar restricciones antes de dibujar
+        const currentW = userImg.width * scale;
+        const currentH = userImg.height * scale;
+
+        // Evitar que la imagen deje bordes vacíos
+        if (offsetX > 0) offsetX = 0;
+        if (offsetY > 0) offsetY = 0;
+        if (offsetX < size - currentW) offsetX = size - currentW;
+        if (offsetY < size - currentH) offsetY = size - currentH;
+
+        // Dibujar usuario
+        ctx.drawImage(userImg, offsetX, offsetY, currentW, currentH);
+        
+        // Dibujar marco
+        if (frameImg) {
+            ctx.drawImage(frameImg, 0, 0, size, size);
+        }
+    }
+
+    function updateZoomText() {
+        const percentage = Math.round((scale / minScale) * 100);
+        zoomValueText.innerText = percentage + '%';
+    }
+
+    // Interacción con Slider
+    zoomSlider.addEventListener('input', (e) => {
+        const oldScale = scale;
+        scale = parseFloat(e.target.value);
+        
+        // Ajustar offset para que el zoom sea hacia el centro
+        const size = canvas.width;
+        const centerX = size / 2;
+        const centerY = size / 2;
+        
+        offsetX = centerX - (centerX - offsetX) * (scale / oldScale);
+        offsetY = centerY - (centerY - offsetY) * (scale / oldScale);
+
+        updateZoomText();
+        draw();
+    });
+
+    // Eventos de Arrastre
+    function startDrag(e) {
+        isDragging = true;
+        const pos = getEventPos(e);
+        startX = pos.x - offsetX;
+        startY = pos.y - offsetY;
+    }
+
+    function moveDrag(e) {
+        if (!isDragging) return;
+        e.preventDefault();
+        const pos = getEventPos(e);
+        offsetX = pos.x - startX;
+        offsetY = pos.y - startY;
+        draw();
+    }
+
+    function stopDrag() {
+        isDragging = false;
+    }
+
+    function getEventPos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        
+        // Convertir coordenadas de pantalla a coordenadas de canvas
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        
+        return {
+            x: (clientX - rect.left) * scaleX,
+            y: (clientY - rect.top) * scaleY
+        };
+    }
+
+    canvas.addEventListener('mousedown', startDrag);
+    window.addEventListener('mousemove', moveDrag);
+    window.addEventListener('mouseup', stopDrag);
+
+    canvas.addEventListener('touchstart', startDrag, { passive: false });
+    window.addEventListener('touchmove', moveDrag, { passive: false });
+    window.addEventListener('touchend', stopDrag);
+
     function loadImage(url) {
         return new Promise((resolve, reject) => {
             const img = new Image();
-            
-            // Si es Base64, no necesitamos configurar crossOrigin
             if (!url.startsWith('data:')) {
                 img.crossOrigin = 'anonymous';
             }
-            
-            img.onload = () => {
-                resolve(img);
-            };
-            
-            img.onerror = () => {
-                reject(new Error("No se pudo cargar la imagen: " + url.substring(0, 50)));
-            };
-            
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error("No se pudo cargar la imagen"));
             img.src = url;
         });
     }
 
     downloadBtn.addEventListener('click', () => {
         try {
-            console.log("Iniciando descarga...");
             const dataUrl = canvas.toDataURL('image/png');
-            
             const link = document.createElement('a');
             link.download = 'foto-con-marco.png';
             link.href = dataUrl;
-            
-            // Forzar descarga en Edge/Chrome
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            
-            console.log("Descarga solicitada via link.");
         } catch (error) {
             console.error("Error al descargar:", error);
-            alert("Error al generar la descarga. Por favor, usa el clic derecho sobre la imagen para guardarla.");
+            alert("Error al generar la descarga. Usa clic derecho en la imagen.");
         }
     });
 </script>
