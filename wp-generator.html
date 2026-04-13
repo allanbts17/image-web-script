@@ -31,8 +31,11 @@
             padding: 30px 15px;
             cursor: pointer;
             transition: background 0.2s ease;
-            margin-bottom: 20px;
             background: rgba(75, 152, 200, 0.03);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
         }
 
         .ua-upload-area:hover {
@@ -244,7 +247,7 @@
                     uploadLabel.style.display = 'block';
                     uploadLabel.innerText = 'Cambiar foto';
                 };
-                reader.readAsDataURL(file);
+                reader.readAsDataURL(processedFile);
             }
 
             function render() {
