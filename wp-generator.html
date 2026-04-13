@@ -168,6 +168,7 @@
         </button>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/heic2any/dist/heic2any.min.js"></script>
     <script>
         (function() {
             const FRAME_URL = 'https://i.postimg.cc/sftZPzn0/frame1.png';
@@ -196,6 +197,28 @@
             async function initProcess(file) {
                 uploadLabel.style.display = 'none';
                 loader.style.display = 'block';
+
+                let processedFile = file;
+                console.log(file);
+                // Soporte para archivos HEIC (iPhone)
+                if (file.name.toLowerCase().endsWith('.heic') || file.type === 'image/heic') {
+                    try {
+                        const blob = await heic2any({
+                            blob: file,
+                            toType: "image/jpeg",
+                            quality: 0.7
+                        });
+                        console.log(blob);
+                        processedFile = Array.isArray(blob) ? blob[0] : blob;
+                    } catch (err) {
+                        console.error('Error convirtiendo HEIC:', err);
+                        alert('No se pudo procesar el formato HEIC. Prueba con JPG o PNG.');
+                        loader.style.display = 'none';
+                        uploadLabel.style.display = 'block';
+                        return;
+                    }
+                }
+
                 const reader = new FileReader();
                 reader.onload = async (e) => {
                     userImg = await loadImg(e.target.result);
